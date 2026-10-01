@@ -66,7 +66,7 @@ jobs:
           - userName: l285432769
             repoName: Box
             branchName: main
-            java_ver: 11 # Box 仓库强制 Java 11 以免 AGP 不兼容
+            java_ver: 11
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -109,6 +109,7 @@ jobs:
               fi
             fi
           fi
+          
           if [ -f app/src/main/res/layout/dialog_about.xml ]; then
             sed -i "/android:text=/s#=\"#=\"${{ env.tag }}\\\\n\\\\n#" app/src/main/res/layout/dialog_about.xml || true
           fi
@@ -122,8 +123,14 @@ jobs:
             fi
           fi
           
+          # --- 修复 Chaquopy 的 Python 依赖问题 ---
           if [ -d pyramid ] && [ -f pyramid/requirements.txt ]; then
-            sed -i 's/^pyquery$/pyquery==1.4.3/' pyramid/requirements.txt || true
+            echo "Original requirements.txt:"
+            cat pyramid/requirements.txt
+            # 匹配所有以 pyquery 开头的行，强制改为 pyquery==1.4.3，避免拉取需要 cssselect>=1.5.0 的版本
+            sed -i 's/^pyquery.*/pyquery==1.4.3/' pyramid/requirements.txt || true
+            echo "Modified requirements.txt:"
+            cat pyramid/requirements.txt
           fi
 
       - name: Show repo files and Gradle config (Diagnostics)
@@ -139,8 +146,6 @@ jobs:
           echo "If present, show settings.gradle:"
           if [ -f settings.gradle ]; then sed -n '1,200p' settings.gradle; fi
           if [ -f settings.gradle.kts ]; then sed -n '1,200p' settings.gradle.kts; fi
-          echo "If present, show app/build.gradle (first 50 lines):"
-          if [ -f app/build.gradle ]; then sed -n '1,50p' app/build.gradle; fi
 
       - name: Compress Source Code
         if: ${{ env.commit }}
@@ -165,7 +170,22 @@ jobs:
         working-directory: TVBoxOSC
         run: |
           if [ -f pyramid/build.gradle ]; then
+            echo "Original pyramid/build.gradle:"
+            cat pyramid/build.gradle
+            
+            # 移除 buildPython python.exe 的无效行
             sed -i '/buildPython.*python.exe/d' pyramid/build.gradle || true
+            
+            # 如果 build.gradle 里有 install "pyquery"，也强制替换版本
+            sed -i 's/install *["'\'']pyquery["'\'']/install "pyquery==1.4.3"/g' pyramid/build.gradle || true
+            
+            # 在 chaquopy 块中添加 pipOptions 使用 PyPI 作为额外索引源（防止 Chaquopy 源缺少某些包）
+            if ! grep -q "pipOptions" pyramid/build.gradle; then
+              sed -i '/chaquopy {/a\        pipOptions "--extra-index-url=https://pypi.org/simple"' pyramid/build.gradle || true
+            fi
+            
+            echo "Modified pyramid/build.gradle:"
+            cat pyramid/build.gradle
           fi
 
       - name: Setup Python local.properties
@@ -207,7 +227,6 @@ jobs:
         working-directory: TVBoxOSC
         run: |
           chmod +x gradlew
-          # 使用 --stacktrace --info 打印完整日志，并加入重试机制应对 502 Bad Gateway 网络波动
           set +e
           max_retries=3
           count=0
