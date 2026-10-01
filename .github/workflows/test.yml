@@ -66,7 +66,7 @@ jobs:
           - userName: l285432769
             repoName: Box
             branchName: main
-            java_ver: 11 # Box 仓库指定 Java 11
+            java_ver: 11 # Box 仓库强制 Java 11
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -104,9 +104,13 @@ jobs:
             if [ "${{ matrix.userName }}" == "takagen99" ]; then
               sed -i 's/\.concat(buildTime())/ +\"${{ env.tag }}\"/g' app/build.gradle || true
             else
-              sed -i "/versionName/s#[0-9a-zA-Z_\.\'\"-]\+\$#\'${{ env.tag }}\'#" app/build.gradle || true
+              # 仅当当前行包含 versionName 时才替换，避免破坏其他代码
+              if grep -q 'versionName' app/build.gradle; then
+                sed -i "/versionName/s#[0-9a-zA-Z_\.\'\"-]\+\$#\'${{ env.tag }}\'#" app/build.gradle || true
+              fi
             fi
           fi
+          
           if [ -f app/src/main/res/layout/dialog_about.xml ]; then
             sed -i "/android:text=/s#=\"#=\"${{ env.tag }}\\\\n\\\\n#" app/src/main/res/layout/dialog_about.xml || true
           fi
@@ -120,7 +124,7 @@ jobs:
             fi
           fi
           
-          # 仅当存在 pyramid 目录时才修改 Python 依赖，防止 Box 等无 Python 项目报错
+          # 仅在 TVBoxOS 的 pyramid 目录存在时修改 Python 依赖，Box 仓库大概率没有
           if [ -d pyramid ] && [ -f pyramid/requirements.txt ]; then
             sed -i 's/^pyquery$/pyquery==1.4.3/' pyramid/requirements.txt || true
           fi
@@ -160,14 +164,16 @@ jobs:
         if: ${{ env.commit }}
         working-directory: TVBoxOSC
         run: |
-          # 修复签名配置注入逻辑，加入 || true 防止文件不存在时报错
-          signingConfigs='ICAgIHNpZ25pbmdDb25maWdzIHtcCiAgICAgICAgaWYgKHByb2plY3QuaGFzUHJvcGVydHkoIlJFTEVBU0VfU1RPUkVfRklMRSIpKSB7XAogICAgICAgICAgICBteUNvbmZpZyB7XAogICAgICAgICAgICAgICAgc3RvcmVGaWxlIGZpbGUoUkVMRUFTRV9TVE9SRV9GSUxFKVwKICAgICAgICAgICAgICAgIHN0b3JlUGFzc3dvcmQgUkVMRUFTRV9TVE9SRV9QQVNTV09SRFwKICAgICAgICAgICAgICAgIGtleUFsaWFzIFJFTEVBU0VfS0VZX0FMSUFTXAogICAgICAgICAgICAgICAga2V5UGFzc3dvcmQgUkVMRUFTRV9LRVlfUEFTU1dPUkRcCiAgICAgICAgICAgICAgICB2MVNpZ25pbmdFbmFibGVkIHRydWVcCiAgICAgICAgICAgICAgICB2MlNpZ25pbmdFbmFibGVkIHRydWVcCiAgICAgICAgICAgICAgICBlbmFibGVWM1NpZ25pbmcgPSB0cnVlXAogICAgICAgICAgICAgICAgZW5hYmxlVjRTaWduaW5nID0gdHJ1ZVwKICAgICAgICAgICAgfVwKICAgICAgICB9XAogICAgfVwKXA=='
-          signingConfig='ICAgICAgICAgICAgaWYgKHByb2plY3QuaGFzUHJvcGVydHkoIlJFTEVBU0VfU1RPUkVfRklMRSIpKSB7XAogICAgICAgICAgICAgICAgc2lnbmluZ0NvbmZpZyBzaWduaW5nQ29uZmlncy5teUNvbmZpZ1wKICAgICAgICAgICAgfVwK'
-          signingConfigs="$(echo "$signingConfigs" |base64 -d )"
-          signingConfig="$(echo "$signingConfig" |base64 -d )"
+          # 仅当 app/build.gradle 存在时，才注入签名配置
           if [ -f app/build.gradle ]; then
+            signingConfigs='ICAgIHNpZ25pbmdDb25maWdzIHtcCiAgICAgICAgaWYgKHByb2plY3QuaGFzUHJvcGVydHkoIlJFTEVBU0VfU1RPUkVfRklMRSIpKSB7XAogICAgICAgICAgICBteUNvbmZpZyB7XAogICAgICAgICAgICAgICAgc3RvcmVGaWxlIGZpbGUoUkVMRUFTRV9TVE9SRV9GSUxFKVwKICAgICAgICAgICAgICAgIHN0b3JlUGFzc3dvcmQgUkVMRUFTRV9TVE9SRV9QQVNTV09SRFwKICAgICAgICAgICAgICAgIGtleUFsaWFzIFJFTEVBU0VfS0VZX0FMSUFTXAogICAgICAgICAgICAgICAga2V5UGFzc3dvcmQgUkVMRUFTRV9LRVlfUEFTU1dPUkRcCiAgICAgICAgICAgICAgICB2MVNpZ25pbmdFbmFibGVkIHRydWVcCiAgICAgICAgICAgICAgICB2MlNpZ25pbmdFbmFibGVkIHRydWVcCiAgICAgICAgICAgICAgICBlbmFibGVWM1NpZ25pbmcgPSB0cnVlXAogICAgICAgICAgICAgICAgZW5hYmxlVjRTaWduaW5nID0gdHJ1ZVwKICAgICAgICAgICAgfVwKICAgICAgICB9XAogICAgfVwKXA=='
+            signingConfig='ICAgICAgICAgICAgaWYgKHByb2plY3QuaGFzUHJvcGVydHkoIlJFTEVBU0VfU1RPUkVfRklMRSIpKSB7XAogICAgICAgICAgICAgICAgc2lnbmluZ0NvbmZpZyBzaWduaW5nQ29uZmlncy5teUNvbmZpZ1wKICAgICAgICAgICAgfVwK'
+            signingConfigs="$(echo "$signingConfigs" |base64 -d )"
+            signingConfig="$(echo "$signingConfig" |base64 -d )"
             sed -i -e "/defaultConfig {/i\\$signingConfigs " -e "/debug {/a\\$signingConfig " -e "/release {/a\\$signingConfig " app/build.gradle || true
           fi
+          
+          # 签名文件及属性追加，存在才执行
           if [ -f .github/workflows/TVBoxOSC.jks ]; then
             cp -f ${{ github.workspace }}/.github/workflows/TVBoxOSC.jks app/TVBoxOSC.jks || true
             sed -i '$a\RELEASE_STORE_FILE=./TVBoxOSC.jks'     ./gradle.properties || true
@@ -190,8 +196,8 @@ jobs:
         working-directory: TVBoxOSC
         run: |
           chmod +x gradlew
-          # 去掉了 --parallel 防止旧项目并发报错，加入 --stacktrace 方便排错
-          ./gradlew assembleRelease --build-cache --daemon --warning-mode all --stacktrace -Dorg.gradle.jvmargs="-Xmx4g -XX:MaxMetaspaceSize=512m"
+          # 去掉 --parallel 防止旧项目并发冲突，加入 --no-daemon 防止守护进程崩溃，开启 --stacktrace 便于排错
+          ./gradlew assembleRelease --build-cache --no-daemon --warning-mode all --stacktrace -Dorg.gradle.jvmargs="-Xmx4g -XX:MaxMetaspaceSize=512m"
 
       - name: Prepare App
         if: ${{ env.commit }}
