@@ -98,6 +98,9 @@ jobs:
       - name: Extra Modify
         if: ${{ env.commit }}
         working-directory: TVBoxOSC
+        env:
+          GITHUB_ACTOR: ${{ github.actor }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           echo '修改VersionName'
           if [ -f app/build.gradle ]; then
@@ -125,32 +128,41 @@ jobs:
           
           # --- 修复 Chaquopy 的 Python 依赖问题 ---
           if [ -d pyramid ] && [ -f pyramid/requirements.txt ]; then
-            echo "Original requirements.txt:"
-            cat pyramid/requirements.txt
             sed -i 's/^pyquery.*/pyquery==1.4.3/' pyramid/requirements.txt || true
-            echo "Modified requirements.txt:"
-            cat pyramid/requirements.txt
           fi
 
-          # --- 针对 Box 仓库的特殊修复 (KAPT / nextlib 依赖) ---
+          # --- 针对 Box 仓库的特殊修复 (KAPT / nextlib / JitPack) ---
           if [ "${{ matrix.repoName }}" == "Box" ] && [ -f app/build.gradle ]; then
-            echo "Applying KAPT & nextlib fixes for Box repository..."
-            # 确保 kotlin-kapt 插件被应用
+            echo "Applying KAPT, JitPack & nextlib fixes for Box repository..."
+            
+            # 1. 修正依赖坐标：io.github -> com.github，并尝试稳定版本 1.7.0
+            sed -i 's/io\.github\.anilbeesetti:nextlib-media3ext-ffdecoder:[0-9.]*/com.github.anilbeesetti:nextlib-media3ext-ffdecoder:1.7.0/g' app/build.gradle || true
+            if ! grep -q "nextlib-media3ext-ffdecoder" app/build.gradle; then
+              sed -i '/dependencies {/a\    implementation "com.github.anilbeesetti:nextlib-media3ext-ffdecoder:1.7.0"' app/build.gradle || true
+            fi
+            
+            # 2. 确保 kotlin-kapt 插件被应用
             if ! grep -q "kotlin-kapt" app/build.gradle; then
-              echo "Adding kotlin-kapt plugin..."
               sed -i '1i apply plugin: "kotlin-kapt"' app/build.gradle || true
             fi
-            # 注入 KAPT 配置，防止类型丢失报错
+            
+            # 3. 注入 KAPT 容错
             if ! grep -q "correctErrorTypes" app/build.gradle; then
-              echo "Adding correctErrorTypes true..."
               sed -i '/android {/i kapt { correctErrorTypes true }' app/build.gradle || true
             fi
-            # 注入缺失的 nextlib 依赖
-            if ! grep -q "nextlib-media3ext-ffdecoder" app/build.gradle; then
-              echo "Injecting nextlib-media3ext-ffdecoder dependency..."
-              # 在 dependencies 块的开头插入
-              sed -i '/dependencies {/a\    implementation "io.github.anilbeesetti:nextlib-media3ext-ffdecoder:1.0.0"' app/build.gradle || true
+            
+            # 4. 在 build.gradle 的 repositories 中注入 JitPack 和认证信息
+            if ! grep -q "jitpack.io" build.gradle; then
+              echo "Injecting JitPack repository to build.gradle..."
+              # 找到 allprojects repositories 或 buildscript repositories，在其后插入
+              sed -i '/repositories {/a\        maven { url "https://jitpack.io"; credentials { username = System.getenv("GITHUB_ACTOR"); password = System.getenv("GITHUB_TOKEN") } }' build.gradle || true
             fi
+            # 如果 settings.gradle 存在，也尝试注入 JitPack 配置（针对依赖解析管理）
+            if [ -f settings.gradle ] && ! grep -q "jitpack.io" settings.gradle; then
+              echo "Injecting JitPack repository to settings.gradle..."
+              sed -i '/repositories {/a\        maven { url "https://jitpack.io"; credentials { username = System.getenv("GITHUB_ACTOR"); password = System.getenv("GITHUB_TOKEN") } }' settings.gradle || true
+            fi
+            
             echo "Modified app/build.gradle for Box:"
             cat app/build.gradle
           fi
@@ -191,8 +203,6 @@ jobs:
         working-directory: TVBoxOSC
         run: |
           if [ -f pyramid/build.gradle ]; then
-            echo "Original pyramid/build.gradle:"
-            cat pyramid/build.gradle
             sed -i '/buildPython.*python.exe/d' pyramid/build.gradle || true
             sed -i 's/install *["'\'']pyquery["'\'']/install "pyquery==1.4.3"/g' pyramid/build.gradle || true
             if ! grep -q "pipOptions" pyramid/build.gradle; then
@@ -236,9 +246,12 @@ jobs:
       - uses: gradle/actions/setup-gradle@v3
         if: ${{ env.commit }}
 
-      - name: Build With Gradle (with Retry for 502 errors)
+      - name: Build With Gradle (with Retry for 502/401 errors)
         if: ${{ env.commit }}
         working-directory: TVBoxOSC
+        env:
+          GITHUB_ACTOR: ${{ github.actor }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           chmod +x gradlew
           set +e
