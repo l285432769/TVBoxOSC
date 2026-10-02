@@ -127,10 +127,32 @@ jobs:
           if [ -d pyramid ] && [ -f pyramid/requirements.txt ]; then
             echo "Original requirements.txt:"
             cat pyramid/requirements.txt
-            # 匹配所有以 pyquery 开头的行，强制改为 pyquery==1.4.3，避免拉取需要 cssselect>=1.5.0 的版本
             sed -i 's/^pyquery.*/pyquery==1.4.3/' pyramid/requirements.txt || true
             echo "Modified requirements.txt:"
             cat pyramid/requirements.txt
+          fi
+
+          # --- 针对 Box 仓库的特殊修复 (KAPT / nextlib 依赖) ---
+          if [ "${{ matrix.repoName }}" == "Box" ] && [ -f app/build.gradle ]; then
+            echo "Applying KAPT & nextlib fixes for Box repository..."
+            # 确保 kotlin-kapt 插件被应用
+            if ! grep -q "kotlin-kapt" app/build.gradle; then
+              echo "Adding kotlin-kapt plugin..."
+              sed -i '1i apply plugin: "kotlin-kapt"' app/build.gradle || true
+            fi
+            # 注入 KAPT 配置，防止类型丢失报错
+            if ! grep -q "correctErrorTypes" app/build.gradle; then
+              echo "Adding correctErrorTypes true..."
+              sed -i '/android {/i kapt { correctErrorTypes true }' app/build.gradle || true
+            fi
+            # 注入缺失的 nextlib 依赖
+            if ! grep -q "nextlib-media3ext-ffdecoder" app/build.gradle; then
+              echo "Injecting nextlib-media3ext-ffdecoder dependency..."
+              # 在 dependencies 块的开头插入
+              sed -i '/dependencies {/a\    implementation "io.github.anilbeesetti:nextlib-media3ext-ffdecoder:1.0.0"' app/build.gradle || true
+            fi
+            echo "Modified app/build.gradle for Box:"
+            cat app/build.gradle
           fi
 
       - name: Show repo files and Gradle config (Diagnostics)
@@ -143,7 +165,6 @@ jobs:
           if [ -f gradle/wrapper/gradle-wrapper.properties ]; then cat gradle/wrapper/gradle-wrapper.properties; fi
           echo "settings files:"
           ls -la settings.gradle settings.gradle.kts || true
-          echo "If present, show settings.gradle:"
           if [ -f settings.gradle ]; then sed -n '1,200p' settings.gradle; fi
           if [ -f settings.gradle.kts ]; then sed -n '1,200p' settings.gradle.kts; fi
 
@@ -172,18 +193,11 @@ jobs:
           if [ -f pyramid/build.gradle ]; then
             echo "Original pyramid/build.gradle:"
             cat pyramid/build.gradle
-            
-            # 移除 buildPython python.exe 的无效行
             sed -i '/buildPython.*python.exe/d' pyramid/build.gradle || true
-            
-            # 如果 build.gradle 里有 install "pyquery"，也强制替换版本
             sed -i 's/install *["'\'']pyquery["'\'']/install "pyquery==1.4.3"/g' pyramid/build.gradle || true
-            
-            # 在 chaquopy 块中添加 pipOptions 使用 PyPI 作为额外索引源（防止 Chaquopy 源缺少某些包）
             if ! grep -q "pipOptions" pyramid/build.gradle; then
               sed -i '/chaquopy {/a\        pipOptions "--extra-index-url=https://pypi.org/simple"' pyramid/build.gradle || true
             fi
-            
             echo "Modified pyramid/build.gradle:"
             cat pyramid/build.gradle
           fi
